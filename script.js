@@ -1,3 +1,34 @@
+/**
+ * ========================================
+ * ARCADE RACING GAME - MODEL LOADING SYSTEM
+ * ========================================
+ * 
+ * This system automatically handles car parts and environment objects from your Blender model (Car.glb).
+ * 
+ * HOW TO ADD NEW OBJECTS IN BLENDER:
+ * 1. Create your object in Blender (building, fence, tree, etc.)
+ * 2. Name it with one of the prefixes in 'environmentObjectNames' array (see onModelLoaded function)
+ * 3. Export to Car.glb
+ * 4. The system will automatically:
+ *    - Separate it from the car
+ *    - Create physics collision
+ *    - Add shadow casting/receiving
+ *    - Create a colored wireframe helper (toggle with Show/Hide Colliders button)
+ * 
+ * AVAILABLE OBJECT TYPES (with collision colors):
+ * - Building (cyan)
+ * - Fence (yellow)
+ * - Wall (magenta)
+ * - Tree (green)
+ * - Road (gray)
+ * - Obstacle (orange)
+ * - Sign (white)
+ * - Prop (pink)
+ * 
+ * TO ADD A NEW TYPE: Add it to 'environmentObjectNames' array in onModelLoaded()
+ * ========================================
+ */
+
 let scene, camera, renderer, controls;
 let carModel = null;
 let carWrapper = null;
@@ -5,6 +36,13 @@ let carChild = null;
 let carBodyGroup = null;
 let frontWheelsGroup = null;
 let backWheelsGroup = null;
+
+// Environment objects
+let environmentGroup = null;
+let groundObject = null;
+let buildings = [];
+let fences = [];
+let environmentObjects = []; // Generic array for all environment objects
 
 let carSpeed = 0;
 let carDirection = 0;
@@ -16,9 +54,14 @@ let boostDrainRate = 1.0; // Boost drains at 1 second per second
 let boostRefillRate = 0.5; // Boost refills at 0.5 seconds per second (slower refill)
 let keys = {};
 let initialCameraOffset = new THREE.Vector3(3, 2, 5);
-let cameraFollowMode = true;
 let cameraAngle = 0;
 let lastCameraAngle = -1; // Track previous camera angle
+let defaultCameraDistance = 20;
+let defaultCameraHeight = 10;
+let cameraResetTimer = 0;
+let cameraResetDelay = 2.0; // Reset camera 2 seconds after user stops moving it
+let isUserControllingCamera = false;
+let cameraResetInProgress = false;
 
 // Physics variables
 let world;
@@ -99,10 +142,12 @@ function initPhysics() {
         material: new CANNON.Material({ friction: 0.05, restitution: 0 })
     });
     groundBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2);
-    groundBody.position.set(0, -0.5, 0);
+    // Ground physics position will be updated after model loads
+    // For now, use a higher default position
+    groundBody.position.set(0, 0, 0);
     world.addBody(groundBody);
     
-    // Create visual helper for ground
+    // Create visual helper for ground (will be updated after model loads)
     const groundGeometry = new THREE.PlaneGeometry(100, 100);
     const groundMaterial = new THREE.MeshBasicMaterial({ 
         color: 0x00ff00, 
@@ -112,8 +157,10 @@ function initPhysics() {
     });
     groundHelper = new THREE.Mesh(groundGeometry, groundMaterial);
     groundHelper.rotation.x = -Math.PI / 2;
-    groundHelper.position.set(0, -0.5, 0);
+    groundHelper.position.set(0, 0, 0);
     scene.add(groundHelper);
+    
+    console.log('Physics initialized - ground collider will be positioned after model loads');
 }
 
 function setupCamera() {
@@ -146,18 +193,39 @@ function setupRenderer() {
 function setupControls() {
     controls = new THREE.OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
-    controls.dampingFactor = 0.05;
+    controls.dampingFactor = 0.1;
     controls.minDistance = 5;
     controls.maxDistance = 50;
-    controls.maxPolarAngle = Math.PI / 2;
-    controls.enabled = false;
+    controls.maxPolarAngle = Math.PI / 2; // Prevent camera from going below ground
+    controls.minPolarAngle = 0.1; // Prevent straight top-down view
+    controls.enabled = true; // Enabled for behind car mode
     
+    // Disable keyboard controls so WASD only moves the car
     controls.keys = {
         LEFT: null,
         UP: null,
         RIGHT: null,
         BOTTOM: null
     };
+    
+    // Set the target to follow the car
+    controls.target.set(0, 0, 0);
+    
+    // Add event listeners to detect when user is controlling the camera
+    controls.addEventListener('start', function() {
+        isUserControllingCamera = true;
+        cameraResetTimer = 0;
+        cameraResetInProgress = false;
+    });
+    
+    controls.addEventListener('end', function() {
+        isUserControllingCamera = false;
+        cameraResetTimer = 0; // Start counting down to reset
+    });
+    
+    console.log('Camera: Behind car mode with mouse control');
+    console.log('  - Mouse: Rotate camera around car (auto-resets after 2s)');
+    console.log('  - Press Q: Cycle camera angles (behind car / top-down)');
 }
 
 function setupLighting() {
@@ -201,14 +269,14 @@ function setupFloor() {
     });
     const floor = new THREE.Mesh(floorGeometry, floorMaterial);
     floor.rotation.x = -Math.PI / 2;
-    floor.position.y = -0.5;
+    floor.position.y = 0; // Use Y=0 as ground level
     floor.receiveShadow = true;
     scene.add(floor);
 }
 
 function setupGrid() {
     const gridHelper = new THREE.GridHelper(100, 50, 0x444444, 0x333333);
-    gridHelper.position.y = -0.49;
+    gridHelper.position.y = 0; // Use Y=0 as ground level
     scene.add(gridHelper);
 }
 
@@ -260,11 +328,14 @@ function setupShadowGround() {
     
     const shadowGround = new THREE.Mesh(groundGeometry, groundMaterial);
     shadowGround.rotation.x = -Math.PI / 2;
-    shadowGround.position.y = -0.48; // Slightly higher to ensure it's visible
+    shadowGround.position.y = 0.01; // Will be updated after model loads
     shadowGround.receiveShadow = true;
     scene.add(shadowGround);
     
-    console.log('Shadow ground created at Y:', shadowGround.position.y);
+    // Store reference for later update
+    window.shadowGroundPlane = shadowGround;
+    
+    console.log('Shadow ground created at Y:', shadowGround.position.y, '(will be updated after model loads)');
 }
 
 function createDeliveryZones() {
@@ -278,7 +349,7 @@ function createDeliveryZones() {
         emissiveIntensity: 0.3
     });
     pickupZone = new THREE.Mesh(pickupGeometry, pickupMaterial);
-    pickupZone.position.set(pickupLocation.x, -0.4, pickupLocation.z);
+    pickupZone.position.set(pickupLocation.x, 0.1, pickupLocation.z); // Slightly above ground
     scene.add(pickupZone);
     
     // Create delivery zone (blue circle) - hidden initially
@@ -291,7 +362,7 @@ function createDeliveryZones() {
         emissiveIntensity: 0.3
     });
     deliveryZone = new THREE.Mesh(deliveryGeometry, deliveryMaterial);
-    deliveryZone.position.set(deliveryLocation.x, -0.4, deliveryLocation.z);
+    deliveryZone.position.set(deliveryLocation.x, 0.1, deliveryLocation.z); // Slightly above ground
     deliveryZone.visible = false; // Hidden until package picked up
     scene.add(deliveryZone);
 }
@@ -319,49 +390,116 @@ function findObjectInHierarchy(root, name) {
 function onModelLoaded(gltf) {
     carModel = gltf.scene;
     
-    // logModelHierarchy(carModel);
+    console.log('=== MODEL LOADED - CATEGORIZING OBJECTS ===');
+    console.log('Add new object types to the environmentObjectNames array below to automatically handle them');
+    logModelHierarchy(carModel);
     
+    // Create groups for different object types
     carWrapper = new THREE.Group();
+    environmentGroup = new THREE.Group();
     
-    // Find Ground object anywhere in the hierarchy
-    let groundObject = findObjectInHierarchy(carModel, "Ground");
+    // Define what objects belong to the car vs environment
+    // CAR OBJECTS: These will move with the car
+    const carObjectNames = ['Car_Body', 'Front_Wheels', 'Back_Wheels', 
+                           'FrontLeftWheel', 'FrontRightWheel', 
+                           'BackLeftWheel', 'BackRightWheel',
+                           'Headlight', 'Backlight'];
     
-    if (!groundObject) {
-        console.warn('Ground object not found in model hierarchy!');
-    }
+    // ENVIRONMENT OBJECTS: These are static and will have collision physics
+    // TO ADD NEW OBJECTS: Just add the prefix to this array and name your Blender objects accordingly
+    // Example: Add 'Sign' here, then name objects in Blender as 'Sign', 'Sign.001', etc.
+    const environmentObjectNames = ['Ground', 'Building', 'Fence', 'Road', 
+                                   'Wall', 'Obstacle', 'Tree', 'Prop', 'Sign'];
     
+    // Categorize objects from the loaded model
     const childrenToMove = [];
     carModel.children.forEach(child => {
-        if (child.name !== "Ground") {
-            childrenToMove.push(child);
-        }
+        childrenToMove.push(child);
     });
     
     childrenToMove.forEach(child => {
-        carWrapper.add(child);
+        const childName = child.name || '';
+        
+        // Check if it's a car component
+        const isCarComponent = carObjectNames.some(name => childName.includes(name));
+        
+        // Check if it's an environment object
+        const isEnvironmentObject = environmentObjectNames.some(name => childName.includes(name));
+        
+        if (isCarComponent) {
+            console.log(`✓ Adding to CAR: ${childName}`);
+            carWrapper.add(child);
+        } else if (isEnvironmentObject || childName.includes('Ground')) {
+            console.log(`✓ Adding to ENVIRONMENT: ${childName}`);
+            environmentGroup.add(child);
+            
+            // Track specific environment objects
+            if (childName.includes('Ground')) {
+                groundObject = child;
+            } else if (childName.includes('Building')) {
+                buildings.push(child);
+            } else if (childName.includes('Fence')) {
+                fences.push(child);
+            }
+            
+            // Add to generic environment objects array (for physics)
+            // Skip ground as it has its own physics setup
+            if (!childName.includes('Ground')) {
+                environmentObjects.push({
+                    object: child,
+                    type: childName.split('.')[0], // Get base name (e.g., "Building" from "Building.001")
+                    name: childName
+                });
+            }
+        } else {
+            console.warn(`⚠ Unknown object type: ${childName} - adding to environment by default`);
+            environmentGroup.add(child);
+            
+            // Also add unknown objects to environment physics
+            environmentObjects.push({
+                object: child,
+                type: 'Unknown',
+                name: childName
+            });
+        }
     });
     
+    // Add both groups to the scene
     scene.add(carWrapper);
+    scene.add(environmentGroup);
     
-    // Reset Ground transformation BEFORE adding to scene
+    console.log('\n=== LOADING SUMMARY ===');
+    console.log(`✓ Car components: ${carWrapper.children.length}`);
+    console.log(`✓ Environment group: ${environmentGroup.children.length} objects`);
+    console.log(`✓ Buildings: ${buildings.length}`);
+    console.log(`✓ Fences: ${fences.length}`);
+    console.log(`✓ Total environment objects (for physics): ${environmentObjects.length}`);
+    
+    // Show breakdown by type
+    const typeCount = {};
+    environmentObjects.forEach(obj => {
+        typeCount[obj.type] = (typeCount[obj.type] || 0) + 1;
+    });
+    console.log('\nEnvironment objects by type:');
+    Object.entries(typeCount).forEach(([type, count]) => {
+        console.log(`  ${type}: ${count}`);
+    });
+    console.log('=======================\n');
+    
+    // Setup Ground object
     if (groundObject) {
-        // Reset Ground position only (keep original scale from Blender)
-        // Position it lower to sit below the car
-        groundObject.position.set(0, -0.5, 0);
-        // Don't reset scale or rotation - keep original Blender values
-        
-        // Update the matrix to apply transformations
+        console.log('\n=== GROUND SETUP ===');
+        // Keep original Blender position - don't override it
+        // groundObject.position.set(0, -0.5, 0);
         groundObject.updateMatrixWorld(true);
-        
-        // Ensure Ground is properly set up
         groundObject.visible = true;
         groundObject.receiveShadow = true;
+        
         groundObject.traverse(function(node) {
             if (node.isMesh) {
                 node.receiveShadow = true;
                 node.visible = true;
                 
-                // Fix shadow acne on ground
                 if (node.material) {
                     const materials = Array.isArray(node.material) ? node.material : [node.material];
                     materials.forEach(mat => {
@@ -371,36 +509,121 @@ function onModelLoaded(gltf) {
                         }
                     });
                 }
-                
-                // Ground mesh found
             }
         });
         
+        console.log('Ground position:', groundObject.position);
+        console.log('Ground rotation:', groundObject.rotation);
+        console.log('Ground scale:', groundObject.scale);
+        
+        let groundBBox = null;
+        groundObject.traverse(function(node) {
+            if (node.isMesh) {
+                console.log('Ground mesh geometry:', node.geometry);
+                groundBBox = new THREE.Box3().setFromObject(node);
+                console.log('Ground bounding box:', groundBBox);
+            }
+        });
+        
+        // Update physics ground plane to match the actual ground mesh position
+        if (groundBBox) {
+            // Use the top surface of the ground as the collision plane
+            const groundTopY = groundBBox.max.y;
+            console.log('Setting ground physics collider to Y =', groundTopY);
+            
+            // Update physics ground body position
+            groundBody.position.y = groundTopY;
+            
+            // Update visual helper position
+            if (groundHelper) {
+                groundHelper.position.y = groundTopY;
+            }
+            
+            // Update shadow ground position to be slightly above the ground
+            if (window.shadowGroundPlane) {
+                window.shadowGroundPlane.position.y = groundTopY + 0.01;
+                console.log('Shadow ground updated to Y =', window.shadowGroundPlane.position.y);
+            }
+            
+            // Update delivery zones to be on the ground
+            if (pickupZone) {
+                pickupZone.position.y = groundTopY + 0.1;
+            }
+            if (deliveryZone) {
+                deliveryZone.position.y = groundTopY + 0.1;
+            }
+            
+            console.log('✓ Ground physics collider updated to match model');
+            console.log('✓ Shadow ground and delivery zones positioned on ground surface');
+        } else {
+            console.warn('⚠ Could not calculate ground bounding box - using default Y=0');
+        }
+    } else {
+        console.warn('⚠ Ground object not found in model!');
     }
     
-    // Add the car model to scene (which includes the properly positioned Ground)
+    // Setup Buildings
+    if (buildings.length > 0) {
+        console.log('\n=== BUILDINGS SETUP ===');
+        buildings.forEach((building, index) => {
+            console.log(`Building ${index + 1}:`, building.name);
+            console.log('  Position:', building.position);
+            console.log('  Rotation:', building.rotation);
+            console.log('  Scale:', building.scale);
+            
+            building.traverse(function(node) {
+                if (node.isMesh) {
+                    node.castShadow = true;
+                    node.receiveShadow = true;
+                    const bbox = new THREE.Box3().setFromObject(node);
+                    console.log('  Bounding box:', bbox);
+                }
+            });
+        });
+    }
+    
+    // Setup Fences
+    if (fences.length > 0) {
+        console.log('\n=== FENCES SETUP ===');
+        fences.forEach((fence, index) => {
+            console.log(`Fence ${index + 1}:`, fence.name);
+            console.log('  Position:', fence.position);
+            console.log('  Rotation:', fence.rotation);
+            console.log('  Scale:', fence.scale);
+            
+            fence.traverse(function(node) {
+                if (node.isMesh) {
+                    node.castShadow = true;
+                    node.receiveShadow = true;
+                    const bbox = new THREE.Box3().setFromObject(node);
+                    console.log('  Bounding box:', bbox);
+                }
+            });
+        });
+    }
+    
+    console.log('===========================\n');
+    
+    // Add the car model back to scene (parent container)
     scene.add(carModel);
     
-    // Center the car at origin without scaling
+    // Keep original Blender position - don't override it
+    console.log('\n=== CAR POSITION ===');
+    console.log('Keeping original Blender position for car');
+    console.log('Car wrapper position:', carWrapper.position);
+    
+    // Calculate bounding box for reference (but don't change position)
     const box = new THREE.Box3().setFromObject(carWrapper);
     const center = box.getCenter(new THREE.Vector3());
+    console.log('Car bounding box center:', center);
+    console.log('Car bounding box min:', box.min);
+    console.log('Car bounding box max:', box.max);
+    console.log('====================\n');
     
-    // Move car to center, preserving original Blender scale
-    carWrapper.position.x = -center.x;
-    carWrapper.position.y = -center.y;
-    carWrapper.position.z = -center.z;
-    
-    // Adjust car vertical position to sit on ground
-    if (groundObject) {
-        const carBox = new THREE.Box3().setFromObject(carWrapper);
-        const carBottomY = carBox.min.y;
-        const groundY = -0.5; // Ground position we set earlier
-        
-        // Calculate the offset needed to place the bottom of the car on the ground
-        const yOffset = groundY - carBottomY;
-        carWrapper.position.y += yOffset;
-        
-    }
+    // REMOVED: Position adjustments - let Blender positions be used as-is
+    // carWrapper.position.x = -center.x;
+    // carWrapper.position.y = -center.y;
+    // carWrapper.position.z = -center.z;
     
     // Enable shadows on all car meshes
     carModel.traverse(function (node) {
@@ -435,6 +658,7 @@ function onModelLoaded(gltf) {
     findCarComponents();
     createHeadlights();
     createCarPhysicsBody();
+    createEnvironmentPhysics(); // Create physics for buildings and fences
     
     console.log('Shadow setup complete - car should cast shadows');
     
@@ -674,6 +898,70 @@ function toggleHeadlights() {
     console.log('Backlights:', headlightsOn ? 'ON' : 'OFF');
 }
 
+function createEnvironmentPhysics() {
+    console.log('=== CREATING ENVIRONMENT PHYSICS ===');
+    console.log(`Total environment objects to process: ${environmentObjects.length}`);
+    
+    // Color coding for different object types
+    const colorMap = {
+        'Building': 0x00ffff,  // Cyan
+        'Fence': 0xffff00,     // Yellow
+        'Wall': 0xff00ff,      // Magenta
+        'Tree': 0x00ff00,      // Green
+        'Road': 0x888888,      // Gray
+        'Obstacle': 0xff8800,  // Orange
+        'Sign': 0xffffff,      // White
+        'Prop': 0xff0088,      // Pink
+        'Unknown': 0xff0000    // Red
+    };
+    
+    // Create physics bodies for all environment objects
+    environmentObjects.forEach((envObj, index) => {
+        const obj = envObj.object;
+        const bbox = new THREE.Box3().setFromObject(obj);
+        const size = bbox.getSize(new THREE.Vector3());
+        const center = bbox.getCenter(new THREE.Vector3());
+        
+        console.log(`[${index + 1}/${environmentObjects.length}] Creating physics for ${envObj.type}: ${envObj.name}`);
+        console.log('  Size:', size.x.toFixed(2), 'x', size.y.toFixed(2), 'x', size.z.toFixed(2));
+        console.log('  Center:', center.x.toFixed(2), center.y.toFixed(2), center.z.toFixed(2));
+        
+        // Create box collider
+        const shape = new CANNON.Box(new CANNON.Vec3(size.x / 2, size.y / 2, size.z / 2));
+        const body = new CANNON.Body({
+            mass: 0, // Static object
+            shape: shape,
+            material: new CANNON.Material({ friction: 0.3, restitution: 0.1 })
+        });
+        
+        body.position.set(center.x, center.y, center.z);
+        world.addBody(body);
+        
+        // Create visual helper with color based on object type
+        const helperColor = colorMap[envObj.type] || colorMap['Unknown'];
+        const helperGeometry = new THREE.BoxGeometry(size.x, size.y, size.z);
+        const helperMaterial = new THREE.MeshBasicMaterial({ 
+            color: helperColor, 
+            wireframe: true,
+            transparent: true,
+            opacity: 0.5
+        });
+        const helper = new THREE.Mesh(helperGeometry, helperMaterial);
+        helper.position.copy(center);
+        helper.visible = collidersVisible;
+        scene.add(helper);
+        
+        // Store helper reference and physics body
+        obj.userData.physicsHelper = helper;
+        obj.userData.physicsBody = body;
+        
+        console.log('  ✓ Physics body created');
+    });
+    
+    console.log(`✓ Created ${environmentObjects.length} physics bodies`);
+    console.log('===================================\n');
+}
+
 function createCarPhysicsBody() {
     // Create a box shape for the car based on its bounding box
     const box = new THREE.Box3().setFromObject(carWrapper);
@@ -695,16 +983,14 @@ function createCarPhysicsBody() {
     });
     
     // Position the physics body at the CENTER of the bounding box (matching the visual model)
-    const groundY = -0.5;
-    
-    // Position physics body well above ground to ensure clean landing without clipping
-    // Calculate proper Y position so bottom of box is above ground
-    const clearance = 0.2; // Extra clearance to prevent ground clipping
+    // Use the actual center position from the model instead of hardcoding ground level
     carBody.position.set(
         center.x,
-        groundY + (size.y / 2) + clearance, // Bottom of box at ground level + clearance
+        center.y, // Use actual model center Y position
         center.z
     );
+    
+    console.log('Physics body positioned at center:', carBody.position);
     
     // Set initial rotation
     carBody.quaternion.set(
@@ -738,7 +1024,6 @@ function createCarPhysicsBody() {
     console.log('Offset (center - wrapper):', carPhysicsOffset);
     console.log('Car physics body position:', carBody.position);
     console.log('Car size:', size);
-    console.log('Ground at Y:', groundY);
     console.log('Bounding box min:', box.min);
     console.log('Bounding box max:', box.max);
     console.log('========================');
@@ -1020,7 +1305,11 @@ function animate() {
         fpsTimer = 0;
     }
     
-    controls.enabled = !cameraFollowMode;
+    // Update camera controls
+    if (carWrapper) {
+        // Always keep controls target following the car
+        controls.target.copy(carWrapper.position);
+    }
     
     controls.update();
     
@@ -1191,34 +1480,68 @@ function animate() {
             carHelper.quaternion.copy(carBody.quaternion);
         }
         
-        if (cameraFollowMode) {
-            // Track camera angle changes for potential future use
-            lastCameraAngle = cameraAngle;
+        // Camera mode logic
+        if (cameraAngle === 0) {      
+            // Behind car view with mouse control
+            controls.enabled = true;
             
-            if (cameraAngle === 0) {      
-                const cameraDistance = 20;
-                const cameraHeight = 10;
+            // Calculate default camera position
+            const backwardDirection = new THREE.Vector3(-1, 0, 0);
+            backwardDirection.applyQuaternion(carWrapper.quaternion);
+            
+            const defaultCameraPos = new THREE.Vector3(
+                carWrapper.position.x + backwardDirection.x * defaultCameraDistance,
+                carWrapper.position.y + defaultCameraHeight,
+                carWrapper.position.z + backwardDirection.z * defaultCameraDistance
+            );
+            
+            // Handle camera reset logic
+            if (!isUserControllingCamera) {
+                cameraResetTimer += deltaTime;
                 
-                // Get the car's backward direction
-                const backwardDirection = new THREE.Vector3(-1, 0, 0);
-                backwardDirection.applyQuaternion(carWrapper.quaternion);
-
-                camera.position.set(
-                    carWrapper.position.x + backwardDirection.x * cameraDistance,
-                    carWrapper.position.y + cameraHeight,
-                    carWrapper.position.z + backwardDirection.z * cameraDistance
-                );
-                
-                camera.lookAt(carWrapper.position);
-            } else {
-
-                camera.position.set(
-                    carWrapper.position.x,
-                    carWrapper.position.y + 50,  // Above the car
-                    carWrapper.position.z
-                );
-                camera.lookAt(carWrapper.position);
+                if (cameraResetTimer >= cameraResetDelay) {
+                    cameraResetInProgress = true;
+                }
             }
+            
+            // Smoothly reset camera to default position
+            if (cameraResetInProgress) {
+                const resetSpeed = 0.05; // Smooth interpolation factor
+                
+                camera.position.lerp(defaultCameraPos, resetSpeed);
+                
+                // Check if we're close enough to default position to stop resetting
+                const distanceToDefault = camera.position.distanceTo(defaultCameraPos);
+                if (distanceToDefault < 0.5) {
+                    cameraResetInProgress = false;
+                    cameraResetTimer = 0;
+                }
+            }
+            
+            // Update camera mode UI to show status
+            const cameraModeEl = document.getElementById('camera-mode');
+            if (cameraModeEl && cameraAngle === 0) {
+                if (isUserControllingCamera) {
+                    cameraModeEl.textContent = 'Behind Car (User Control)';
+                    cameraModeEl.style.color = '#ffff00'; // Yellow when user is controlling
+                } else if (cameraResetInProgress) {
+                    cameraModeEl.textContent = 'Behind Car (Resetting...)';
+                    cameraModeEl.style.color = '#ff8800'; // Orange when resetting
+                } else {
+                    cameraModeEl.textContent = 'Behind Car';
+                    cameraModeEl.style.color = '#00ff00'; // Green when locked
+                }
+            }
+        } else {
+            // Top-down view - disable mouse controls
+            controls.enabled = false;
+            
+            camera.position.set(
+                carWrapper.position.x,
+                carWrapper.position.y + 50,  // Above the car
+                carWrapper.position.z
+            );
+            camera.lookAt(carWrapper.position);
         }
     }
     
@@ -1238,13 +1561,21 @@ function handleResize() {
 function handleKeyDown(event) {
     keys[event.code] = true;
     
-    if (event.code === 'KeyF') {
-        cameraFollowMode = !cameraFollowMode;
-    }
-    
     if (event.code === 'KeyQ') {
         cameraAngle = (cameraAngle + 1) % 2;
-        cameraFollowMode = true;
+        console.log('Camera angle:', cameraAngle === 0 ? 'Behind Car' : 'Top-Down');
+        
+        // Reset camera state when switching modes
+        isUserControllingCamera = false;
+        cameraResetTimer = 0;
+        cameraResetInProgress = false;
+        
+        // Update UI
+        const cameraModeEl = document.getElementById('camera-mode');
+        if (cameraModeEl) {
+            cameraModeEl.textContent = cameraAngle === 0 ? 'Behind Car' : 'Top-Down';
+            cameraModeEl.style.color = cameraAngle === 0 ? '#00ff00' : '#ffff00';
+        }
     }
     
     if (event.code === 'KeyL') {
@@ -1323,8 +1654,17 @@ function toggleColliders() {
         groundHelper.visible = collidersVisible;
     }
     
+    // Toggle all environment object physics helpers
+    environmentObjects.forEach(envObj => {
+        if (envObj.object.userData.physicsHelper) {
+            envObj.object.userData.physicsHelper.visible = collidersVisible;
+        }
+    });
+    
     const btn = document.getElementById('toggle-colliders');
     btn.textContent = collidersVisible ? 'Hide Colliders' : 'Show Colliders';
+    
+    console.log(`Colliders ${collidersVisible ? 'visible' : 'hidden'} (${environmentObjects.length} environment objects)`);
 }
 
 function toggleDayNight() {
@@ -1494,9 +1834,34 @@ function init() {
         boostPercentageEl.textContent = '100%';
     }
     
+    // Set initial camera mode (behind car)
+    const cameraModeEl = document.getElementById('camera-mode');
+    if (cameraModeEl) {
+        cameraModeEl.textContent = 'Behind Car';
+        cameraModeEl.style.color = '#00ff00';
+    }
+    
     window.getCarDirection = getCarDirection;
     window.setCarSpeed = setCarSpeed;
     window.setCarDirection = setCarDirection;
+    
+    // Print controls help to console
+    console.log('\n╔════════════════════════════════════════╗');
+    console.log('║           CONTROLS HELP                ║');
+    console.log('╠════════════════════════════════════════╣');
+    console.log('║ Camera:                                ║');
+    console.log('║   • Mouse Drag: Rotate camera          ║');
+    console.log('║     (auto-resets after 2 seconds)      ║');
+    console.log('║   • Scroll: Zoom in/out                ║');
+    console.log('║   • Q: Cycle camera (behind/top-down)  ║');
+    console.log('║                                        ║');
+    console.log('║ Car Controls:                          ║');
+    console.log('║   • W/↑: Forward                       ║');
+    console.log('║   • S/↓: Backward                      ║');
+    console.log('║   • A/←: Turn Left                     ║');
+    console.log('║   • D/→: Turn Right                    ║');
+    console.log('║   • Space: Boost                       ║');
+    console.log('╚════════════════════════════════════════╝\n');
 }
 
 init();
