@@ -44,6 +44,15 @@ let buildings = [];
 let fences = [];
 let environmentObjects = []; // Generic array for all environment objects
 
+// Particle effects
+let particleSystems = [];
+let maxParticles = 50; // Max particles per collision
+
+// Screen effects
+let screenShakeAmount = 0;
+let screenShakeDecay = 0.9;
+let impactFlashElement = null;
+
 let carSpeed = 0;
 let carDirection = 0;
 let currentAcceleration = 0; // For smooth acceleration buildup
@@ -659,6 +668,7 @@ function onModelLoaded(gltf) {
     createHeadlights();
     createCarPhysicsBody();
     createEnvironmentPhysics(); // Create physics for buildings and fences
+    setupCollisionListeners(); // Setup collision particle effects
     
     console.log('Shadow setup complete - car should cast shadows');
     
@@ -896,6 +906,216 @@ function toggleHeadlights() {
     
     console.log('Headlights:', headlightsOn ? 'ON' : 'OFF');
     console.log('Backlights:', headlightsOn ? 'ON' : 'OFF');
+}
+
+function createCollisionParticles(position, velocity, color = 0xffaa00) {
+    const particleCount = Math.min(maxParticles, 30);
+    const particles = [];
+    
+    // Create particle geometry
+    const geometry = new THREE.BufferGeometry();
+    const positions = [];
+    const colors = [];
+    const velocities = [];
+    const lifespans = [];
+    
+    for (let i = 0; i < particleCount; i++) {
+        // Starting position at collision point
+        positions.push(position.x, position.y, position.z);
+        
+        // Random color variation
+        const col = new THREE.Color(color);
+        col.offsetHSL(Math.random() * 0.1 - 0.05, 0, Math.random() * 0.2 - 0.1);
+        colors.push(col.r, col.g, col.b);
+        
+        // Random velocities spreading outward
+        const speed = 2 + Math.random() * 3;
+        const angle = Math.random() * Math.PI * 2;
+        const elevation = Math.random() * Math.PI * 0.5; // Up to 90 degrees up
+        
+        const vx = Math.cos(angle) * Math.cos(elevation) * speed + (velocity.x * 0.3);
+        const vy = Math.sin(elevation) * speed + 2; // Add upward force
+        const vz = Math.sin(angle) * Math.cos(elevation) * speed + (velocity.z * 0.3);
+        
+        velocities.push(vx, vy, vz);
+        
+        // Random lifespan (1-2 seconds)
+        lifespans.push(1 + Math.random());
+    }
+    
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    
+    // Create particle material
+    const material = new THREE.PointsMaterial({
+        size: 0.3,
+        vertexColors: true,
+        transparent: true,
+        opacity: 1,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+    });
+    
+    // Create particle system
+    const particleSystem = new THREE.Points(geometry, material);
+    scene.add(particleSystem);
+    
+    // Store particle data
+    particleSystems.push({
+        mesh: particleSystem,
+        velocities: velocities,
+        lifespans: lifespans,
+        age: 0,
+        maxLifespan: Math.max(...lifespans)
+    });
+    
+    console.log('Collision particles created at:', position);
+}
+
+function updateParticles(deltaTime) {
+    // Update all particle systems
+    for (let i = particleSystems.length - 1; i >= 0; i--) {
+        const system = particleSystems[i];
+        system.age += deltaTime;
+        
+        // Remove old particle systems
+        if (system.age > system.maxLifespan) {
+            scene.remove(system.mesh);
+            system.mesh.geometry.dispose();
+            system.mesh.material.dispose();
+            particleSystems.splice(i, 1);
+            continue;
+        }
+        
+        // Update particle positions and opacity
+        const positions = system.mesh.geometry.attributes.position.array;
+        const velocities = system.velocities;
+        const lifespans = system.lifespans;
+        
+        for (let j = 0; j < positions.length / 3; j++) {
+            const idx = j * 3;
+            
+            // Check if this particle is still alive
+            if (system.age < lifespans[j]) {
+                // Update position
+                positions[idx] += velocities[idx] * deltaTime;
+                positions[idx + 1] += velocities[idx + 1] * deltaTime;
+                positions[idx + 2] += velocities[idx + 2] * deltaTime;
+                
+                // Apply gravity
+                velocities[idx + 1] -= 9.8 * deltaTime;
+                
+                // Apply air resistance
+                velocities[idx] *= 0.98;
+                velocities[idx + 1] *= 0.98;
+                velocities[idx + 2] *= 0.98;
+            }
+        }
+        
+        system.mesh.geometry.attributes.position.needsUpdate = true;
+        
+        // Fade out particles
+        const fadeStart = system.maxLifespan * 0.5;
+        if (system.age > fadeStart) {
+            const fadeProgress = (system.age - fadeStart) / (system.maxLifespan - fadeStart);
+            system.mesh.material.opacity = 1 - fadeProgress;
+        }
+    }
+}
+
+function triggerScreenShake(intensity) {
+    screenShakeAmount = Math.min(intensity, 2); // Cap shake intensity
+}
+
+function triggerImpactFlash(intensity) {
+    if (!impactFlashElement) return;
+    
+    const opacity = Math.min(intensity / 10, 0.5); // Max 50% opacity
+    impactFlashElement.style.opacity = opacity;
+    
+    // Fade out quickly
+    setTimeout(() => {
+        impactFlashElement.style.opacity = '0';
+    }, 50);
+}
+
+function updateScreenShake() {
+    if (screenShakeAmount > 0.01) {
+        // Apply screen shake to camera
+        const shakeX = (Math.random() - 0.5) * screenShakeAmount;
+        const shakeY = (Math.random() - 0.5) * screenShakeAmount;
+        const shakeZ = (Math.random() - 0.5) * screenShakeAmount;
+        
+        camera.position.x += shakeX;
+        camera.position.y += shakeY;
+        camera.position.z += shakeZ;
+        
+        // Decay shake
+        screenShakeAmount *= screenShakeDecay;
+    } else {
+        screenShakeAmount = 0;
+    }
+}
+
+function setupCollisionListeners() {
+    if (!carBody) {
+        console.warn('Car body not ready for collision listeners');
+        return;
+    }
+    
+    console.log('Setting up collision listeners...');
+    
+    // Add collision event listener to car body
+    carBody.addEventListener('collide', function(event) {
+        const otherBody = event.body;
+        
+        // Don't create particles for ground collisions
+        if (otherBody === groundBody) {
+            return;
+        }
+        
+        // Calculate collision point
+        const contact = event.contact;
+        const collisionPoint = new THREE.Vector3(
+            contact.bi.position.x,
+            contact.bi.position.y,
+            contact.bi.position.z
+        );
+        
+        // Calculate velocity at collision
+        const velocity = new THREE.Vector3(
+            carBody.velocity.x,
+            carBody.velocity.y,
+            carBody.velocity.z
+        );
+        
+        const speed = velocity.length();
+        
+        // Only create effects for significant impacts
+        if (speed > 3) {
+            // Determine particle color based on speed
+            let color = 0xffaa00; // Orange for light impacts
+            if (speed > 8) {
+                color = 0xff0000; // Red for hard impacts
+            } else if (speed > 5) {
+                color = 0xff6600; // Orange-red for medium impacts
+            }
+            
+            // Create particle effects
+            createCollisionParticles(collisionPoint, velocity, color);
+            
+            // Screen shake based on impact speed
+            const shakeIntensity = Math.min(speed / 10, 1.5);
+            triggerScreenShake(shakeIntensity);
+            
+            // Impact flash based on speed
+            triggerImpactFlash(speed);
+            
+            console.log('💥 Collision! Speed:', speed.toFixed(2), 'Intensity:', shakeIntensity.toFixed(2));
+        }
+    });
+    
+    console.log('✓ Collision listeners active');
 }
 
 function createEnvironmentPhysics() {
@@ -1548,6 +1768,8 @@ function animate() {
     updateDirectionDisplay();
     updateBoost(timeStep);
     updateDeliverySystem(timeStep);
+    updateParticles(deltaTime); // Update collision particles
+    updateScreenShake(); // Apply screen shake
     drawMinimap();
     renderer.render(scene, camera);
 }
@@ -1841,6 +2063,12 @@ function init() {
         cameraModeEl.style.color = '#00ff00';
     }
     
+    // Setup impact flash element
+    impactFlashElement = document.getElementById('impact-flash');
+    if (impactFlashElement) {
+        console.log('✓ Impact flash effects ready');
+    }
+    
     window.getCarDirection = getCarDirection;
     window.setCarSpeed = setCarSpeed;
     window.setCarDirection = setCarDirection;
@@ -1861,6 +2089,11 @@ function init() {
     console.log('║   • A/←: Turn Left                     ║');
     console.log('║   • D/→: Turn Right                    ║');
     console.log('║   • Space: Boost                       ║');
+    console.log('║                                        ║');
+    console.log('║ Collision Effects:                     ║');
+    console.log('║   💥 Particles spawn on impacts        ║');
+    console.log('║   📷 Screen shake (speed-based)        ║');
+    console.log('║   🔥 Impact flash (harder = redder)    ║');
     console.log('╚════════════════════════════════════════╝\n');
 }
 
