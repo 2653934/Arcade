@@ -125,6 +125,12 @@ let fps = 60;
 let fpsUpdateInterval = 0.5; // Update FPS display every 0.5 seconds
 let fpsTimer = 0;
 
+// Mobile controls
+let isMobile = false;
+let joystickActive = false;
+let joystickData = { x: 0, y: 0 };
+let mobileBoostActive = false;
+
 function initScene() {
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x87CEEB); // Sky blue background
@@ -1891,6 +1897,11 @@ function animate() {
         }
     }
     
+    // Update mobile controls if on mobile
+    if (isMobile) {
+        updateCarControlsMobile();
+    }
+    
     updateDirectionDisplay();
     updateBoost(timeStep);
     updateDeliverySystem(timeStep);
@@ -1907,6 +1918,9 @@ function handleResize() {
 }
 
 function handleKeyDown(event) {
+    // Skip keyboard input on mobile
+    if (isMobile) return;
+    
     keys[event.code] = true;
     
     if (event.code === 'KeyQ') {
@@ -1953,6 +1967,9 @@ function handleKeyDown(event) {
 }
 
 function handleKeyUp(event) {
+    // Skip keyboard input on mobile
+    if (isMobile) return;
+    
     keys[event.code] = false;
     
     if (event.code === 'Space') {
@@ -1974,6 +1991,9 @@ function handleKeyUp(event) {
 }
 
 function updateCarControls() {
+    // Skip keyboard controls on mobile
+    if (isMobile) return;
+    
     setCarSpeed(0);
     setCarDirection(0);
     
@@ -2088,6 +2108,238 @@ function toggleDayNight() {
     btn.textContent = isNightMode ? 'Day Mode' : 'Night Mode';
 }
 
+function detectMobile() {
+    const ua = navigator.userAgent;
+    return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua) || 
+           ('ontouchstart' in window) || 
+           (navigator.maxTouchPoints > 0);
+}
+
+function setupMobileControls() {
+    isMobile = detectMobile();
+    
+    console.log('=== MOBILE DETECTION ===');
+    console.log('User Agent:', navigator.userAgent);
+    console.log('Touch Points:', navigator.maxTouchPoints);
+    console.log('Touch Start:', 'ontouchstart' in window);
+    console.log('Is Mobile:', isMobile);
+    
+    if (!isMobile) {
+        console.log('Desktop detected - keyboard controls');
+        return;
+    }
+    
+    console.log('Mobile detected - touch controls enabled');
+    
+    const joystickContainer = document.getElementById('joystick-container');
+    const joystickStick = document.getElementById('joystick-stick');
+    const mobileBoost = document.getElementById('mobile-boost');
+    const mobileCamera = document.getElementById('mobile-camera');
+    const mobileControls = document.getElementById('mobile-controls');
+    
+    console.log('Joystick container:', joystickContainer ? 'Found' : 'NOT FOUND');
+    console.log('Joystick stick:', joystickStick ? 'Found' : 'NOT FOUND');
+    console.log('Mobile controls:', mobileControls ? 'Found' : 'NOT FOUND');
+    
+    if (!joystickContainer || !joystickStick) {
+        console.error('❌ Mobile controls not found in DOM');
+        return;
+    }
+    
+    // Force display mobile controls
+    if (mobileControls) {
+        mobileControls.style.display = 'block';
+        console.log('✓ Mobile controls display set to block');
+    }
+    
+    // Joystick touch handling
+    let joystickTouchId = null;
+    const joystickCenter = { x: 75, y: 75 }; // Half of 150px container
+    const joystickMaxDistance = 40; // Max distance stick can move
+    
+    function updateJoystick(touch) {
+        const rect = joystickContainer.getBoundingClientRect();
+        const touchX = touch.clientX - rect.left;
+        const touchY = touch.clientY - rect.top;
+        
+        // Calculate offset from center
+        const deltaX = touchX - joystickCenter.x;
+        const deltaY = touchY - joystickCenter.y;
+        const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+        
+        // Clamp to max distance
+        const clampedDistance = Math.min(distance, joystickMaxDistance);
+        const angle = Math.atan2(deltaY, deltaX);
+        
+        const stickX = Math.cos(angle) * clampedDistance;
+        const stickY = Math.sin(angle) * clampedDistance;
+        
+        // Update visual position
+        joystickStick.style.transform = `translate(calc(-50% + ${stickX}px), calc(-50% + ${stickY}px))`;
+        
+        // Update joystick data (-1 to 1 range)
+        joystickData.x = stickX / joystickMaxDistance;
+        joystickData.y = stickY / joystickMaxDistance;
+        
+        joystickActive = true;
+    }
+    
+    function resetJoystick() {
+        joystickStick.style.transform = 'translate(-50%, -50%)';
+        joystickData.x = 0;
+        joystickData.y = 0;
+        joystickActive = false;
+        joystickTouchId = null;
+    }
+    
+    // Touch events for joystick
+    joystickContainer.addEventListener('touchstart', function(e) {
+        console.log('🎮 Joystick touched!');
+        e.preventDefault();
+        if (joystickTouchId === null) {
+            joystickTouchId = e.changedTouches[0].identifier;
+            updateJoystick(e.changedTouches[0]);
+        }
+    }, { passive: false });
+    
+    joystickContainer.addEventListener('touchmove', function(e) {
+        e.preventDefault();
+        for (let i = 0; i < e.changedTouches.length; i++) {
+            if (e.changedTouches[i].identifier === joystickTouchId) {
+                updateJoystick(e.changedTouches[i]);
+                break;
+            }
+        }
+    }, { passive: false });
+    
+    joystickContainer.addEventListener('touchend', function(e) {
+        e.preventDefault();
+        for (let i = 0; i < e.changedTouches.length; i++) {
+            if (e.changedTouches[i].identifier === joystickTouchId) {
+                resetJoystick();
+                break;
+            }
+        }
+    }, { passive: false });
+    
+    joystickContainer.addEventListener('touchcancel', function(e) {
+        resetJoystick();
+    });
+    
+    // Also add mouse events for desktop testing
+    let mouseDown = false;
+    joystickContainer.addEventListener('mousedown', function(e) {
+        console.log('🖱️ Joystick mouse down (desktop testing)');
+        e.preventDefault();
+        mouseDown = true;
+        updateJoystick({ clientX: e.clientX, clientY: e.clientY });
+    });
+    
+    document.addEventListener('mousemove', function(e) {
+        if (mouseDown) {
+            updateJoystick({ clientX: e.clientX, clientY: e.clientY });
+        }
+    });
+    
+    document.addEventListener('mouseup', function(e) {
+        if (mouseDown) {
+            mouseDown = false;
+            resetJoystick();
+        }
+    });
+    
+    console.log('✓ Joystick touch events registered');
+    
+    // Boost button
+    if (mobileBoost) {
+        mobileBoost.addEventListener('touchstart', function(e) {
+            e.preventDefault();
+            if (boostAmount > 0) {
+                mobileBoostActive = true;
+                isBoosting = true;
+                // Update UI
+                const boostStatus = document.getElementById('boost-status');
+                if (boostStatus) {
+                    boostStatus.textContent = 'ON';
+                    boostStatus.style.color = '#ffff00';
+                }
+            }
+        }, { passive: false });
+        
+        mobileBoost.addEventListener('touchend', function(e) {
+            e.preventDefault();
+            mobileBoostActive = false;
+            isBoosting = false;
+            // Update UI
+            const boostStatus = document.getElementById('boost-status');
+            if (boostStatus) {
+                if (boostAmount <= 0) {
+                    boostStatus.textContent = 'EMPTY';
+                    boostStatus.style.color = '#ff4444';
+                } else {
+                    boostStatus.textContent = 'OFF';
+                    boostStatus.style.color = '#64b5f6';
+                }
+            }
+        }, { passive: false });
+    }
+    
+    // Camera button
+    if (mobileCamera) {
+        mobileCamera.addEventListener('touchstart', function(e) {
+            e.preventDefault();
+            cameraAngle = (cameraAngle + 1) % 2;
+            console.log('Camera angle:', cameraAngle === 0 ? 'Behind Car' : 'Top-Down');
+            
+            // Reset camera state when switching modes
+            isUserControllingCamera = false;
+            cameraResetTimer = 0;
+            cameraResetInProgress = false;
+            
+            // Update UI
+            const cameraModeEl = document.getElementById('camera-mode');
+            if (cameraModeEl) {
+                cameraModeEl.textContent = cameraAngle === 0 ? 'Behind Car' : 'Top-Down';
+                cameraModeEl.style.color = cameraAngle === 0 ? '#00ff00' : '#ffff00';
+            }
+        }, { passive: false });
+    }
+    
+    console.log('✓ Mobile joystick controls initialized');
+}
+
+// Debug function to force mobile mode (for desktop testing)
+window.forceMobileMode = function() {
+    console.log('🔧 Forcing mobile mode for testing...');
+    isMobile = true;
+    const mobileControls = document.getElementById('mobile-controls');
+    if (mobileControls) {
+        mobileControls.style.display = 'block';
+        console.log('✓ Mobile controls visible');
+    }
+    setupMobileControls();
+};
+
+function updateCarControlsMobile() {
+    if (!isMobile || !joystickActive) return;
+    
+    // Joystick Y-axis controls forward/backward (inverted)
+    const forwardBackward = -joystickData.y; // Negative because joystick Y is inverted
+    
+    if (Math.abs(forwardBackward) > 0.2) {
+        setCarSpeed(forwardBackward * 10);
+    } else {
+        setCarSpeed(0);
+    }
+    
+    // Joystick X-axis controls steering
+    if (Math.abs(joystickData.x) > 0.2) {
+        setCarDirection(joystickData.x);
+    } else {
+        setCarDirection(0);
+    }
+}
+
 function init() {
     initScene();
     initPhysics();
@@ -2195,6 +2447,9 @@ function init() {
         console.log('✓ Impact flash effects ready');
     }
     
+    // Setup mobile controls
+    setupMobileControls();
+    
     window.getCarDirection = getCarDirection;
     window.setCarSpeed = setCarSpeed;
     window.setCarDirection = setCarDirection;
@@ -2203,18 +2458,26 @@ function init() {
     console.log('\n╔════════════════════════════════════════╗');
     console.log('║           CONTROLS HELP                ║');
     console.log('╠════════════════════════════════════════╣');
-    console.log('║ Camera:                                ║');
-    console.log('║   • Mouse Drag: Rotate camera          ║');
-    console.log('║     (auto-resets after 2 seconds)      ║');
-    console.log('║   • Scroll: Zoom in/out                ║');
-    console.log('║   • Q: Cycle camera (behind/top-down)  ║');
-    console.log('║                                        ║');
-    console.log('║ Car Controls:                          ║');
-    console.log('║   • W/↑: Forward                       ║');
-    console.log('║   • S/↓: Backward                      ║');
-    console.log('║   • A/←: Turn Left                     ║');
-    console.log('║   • D/→: Turn Right                    ║');
-    console.log('║   • Space: Boost                       ║');
+    if (isMobile) {
+        console.log('║ 📱 MOBILE CONTROLS                     ║');
+        console.log('║   • Joystick: Move car                 ║');
+        console.log('║   • ⚡ Button: Boost                    ║');
+        console.log('║   • Q Button: Switch camera            ║');
+    } else {
+        console.log('║ 🖥️  DESKTOP CONTROLS                   ║');
+        console.log('║ Camera:                                ║');
+        console.log('║   • Mouse Drag: Rotate camera          ║');
+        console.log('║     (auto-resets after 2 seconds)      ║');
+        console.log('║   • Scroll: Zoom in/out                ║');
+        console.log('║   • Q: Cycle camera (behind/top-down)  ║');
+        console.log('║                                        ║');
+        console.log('║ Car Controls:                          ║');
+        console.log('║   • W/↑: Forward                       ║');
+        console.log('║   • S/↓: Backward                      ║');
+        console.log('║   • A/←: Turn Left                     ║');
+        console.log('║   • D/→: Turn Right                    ║');
+        console.log('║   • Space: Boost                       ║');
+    }
     console.log('║                                        ║');
     console.log('║ Collision Effects:                     ║');
     console.log('║   💥 Particles spawn on impacts        ║');

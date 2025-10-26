@@ -2,7 +2,9 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
     <title>3D Car Viewer</title>
     <link rel="stylesheet" href="style.css">
 </head>
@@ -32,6 +34,18 @@
     <div id="minimap-container">
         <canvas id="minimap" width="200" height="200"></canvas>
         <canvas id="minimap-overlay" width="200" height="200"></canvas>
+    </div>
+    
+    <!-- Mobile Controls -->
+    <div id="mobile-controls">
+        <div id="joystick-container">
+            <div id="joystick-base"></div>
+            <div id="joystick-stick"></div>
+        </div>
+        <div id="mobile-buttons">
+            <div class="mobile-btn" id="mobile-camera">Q</div>
+            <div class="mobile-btn" id="mobile-boost">⚡</div>
+        </div>
     </div>
     
     <!-- Three.js Core Library -->
