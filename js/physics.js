@@ -45,12 +45,6 @@ function createCarPhysicsBody() {
     // Calculate offset between carWrapper position and actual center
     carPhysicsOffset.copy(center).sub(carWrapper.position);
     
-    console.log('=== CAR PHYSICS BODY SETUP ===');
-    console.log('Car wrapper position:', carWrapper.position);
-    console.log('Bounding box center:', center);
-    console.log('Physics offset:', carPhysicsOffset);
-    console.log('Car size:', size);
-    
     const carShape = new CANNON.Box(new CANNON.Vec3(
         size.x / 2,
         size.y / 2,
@@ -88,19 +82,35 @@ function createCarPhysicsBody() {
     
     world.addBody(carBody);
     
-    console.log('Car physics body created at Y:', carBody.position.y);
-    console.log('Car size:', size);
-    console.log('Ground at Y:', groundY);
-    
     // Create visual helper for car collision box
     const helperGeometry = new THREE.BoxGeometry(size.x, size.y, size.z);
     const helperMaterial = new THREE.MeshBasicMaterial({ 
         color: 0xff0000, 
         wireframe: true,
         transparent: true,
-        opacity: 0.8
+        opacity: 0.7
     });
     carHelper = new THREE.Mesh(helperGeometry, helperMaterial);
     scene.add(carHelper);
+    
+    console.log('=== INITIAL POSITIONS ===');
+    console.log('Car wrapper position:', carWrapper.position);
+    console.log('Car bounding box center:', center);
+    console.log('Offset (center - wrapper):', carPhysicsOffset);
+    console.log('Car physics body position:', carBody.position);
+    console.log('Car size:', size);
+    console.log('Ground at Y:', groundY);
+    console.log('Bounding box min:', box.min);
+    console.log('Bounding box max:', box.max);
+    console.log('========================');
+    
+    // Debug: check position after a few frames
+    setTimeout(() => {
+        console.log('=== AFTER 1 SECOND ===');
+        console.log('Car wrapper position:', carWrapper.position);
+        console.log('Car physics body position:', carBody.position);
+        console.log('Car velocity:', carBody.velocity);
+        console.log('=====================');
+    }, 1000);
 }
 

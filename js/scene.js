@@ -4,7 +4,7 @@ function initScene() {
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x87CEEB); // Sky blue background
     // Increased fog distance for larger scene - match sky color
-    scene.fog = new THREE.Fog(0x87CEEB, 50, 300);
+    scene.fog = new THREE.Fog(0x87CEEB, 50, 200);
 }
 
 function setupCamera() {

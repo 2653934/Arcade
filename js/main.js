@@ -32,10 +32,41 @@ function animate() {
             mainDirectionalLight.target.updateMatrixWorld();
         }
         
+        // Calculate turn angle based on steering
+        const maxSteerAngle = Math.PI / 4; // 45 degrees max steering for sharper turns
+        const steerAngle = carDirection * maxSteerAngle;
+        
+        // Update front wheel rotation for visual steering with smooth animation
+        if (frontWheelsGroup) {
+            const targetRotation = -1 * steerAngle;
+            if (frontWheelsGroup.wheels) {
+                frontWheelsGroup.wheels.forEach(function (wheel) {
+                    gsap.to(wheel.rotation, {
+                        y: targetRotation,
+                        duration: 0.25, // Faster response for snappier feel
+                        ease: "power2.out"
+                    });
+                });
+            } else {
+                frontWheelsGroup.traverse(function (node) {
+                    if (node.name === "FrontRightWheel" || node.name === "FrontLeftWheel") {
+                        gsap.to(node.rotation, {
+                            y: targetRotation,
+                            duration: 0.25, // Faster response for snappier feel
+                            ease: "power2.out"
+                        });
+                    }
+                });
+            }
+        }
+        
+        // Wake up the physics body to ensure it responds
+        carBody.wakeUp();
+        
         // Force the car to stay perfectly level (no pitch or roll)
         const euler = new CANNON.Vec3();
         carBody.quaternion.toEuler(euler);
-        carBody.quaternion.setFromEuler(0, euler.y, 0);
+        carBody.quaternion.setFromEuler(0, euler.y, 0); // Keep only Y rotation
         
         // Zero out any X or Z angular velocity to prevent tipping
         carBody.angularVelocity.x = 0;
@@ -49,6 +80,23 @@ function animate() {
             carBody.velocity.y *= 0.8;
         }
         
+        // More controlled turning
+        if (Math.abs(carDirection) > 0.01 && Math.abs(carSpeed) > 0.1) {
+            // Use carSpeed directly (not abs) so steering inverts naturally when reversing
+            const turnTorque = -carDirection * carSpeed * 15;
+            carBody.torque.set(0, turnTorque, 0);
+            
+            // Lower max turning speed
+            const maxAngularSpeed = 2.5; // Reduced from 4.0
+            if (Math.abs(carBody.angularVelocity.y) > maxAngularSpeed) {
+                carBody.angularVelocity.y = Math.sign(carBody.angularVelocity.y) * maxAngularSpeed;
+            }
+        } else {
+            // Gentler snap back to center
+            const counterTorque = -carBody.angularVelocity.y * 70; // Reduced from 100
+            carBody.torque.set(0, counterTorque, 0);
+        }
+        
         // Sync Three.js visual model with physics body
         carWrapper.quaternion.copy(carBody.quaternion);
         
@@ -57,7 +105,7 @@ function animate() {
         rotatedOffset.applyQuaternion(carWrapper.quaternion);
         carWrapper.position.copy(carBody.position).sub(rotatedOffset);
         
-        // Update collision helper to match physics body
+        // Update collision helper to match physics body (no offset needed)
         if (carHelper) {
             carHelper.position.copy(carBody.position);
             carHelper.quaternion.copy(carBody.quaternion);
@@ -68,10 +116,9 @@ function animate() {
     }
     
     // Update UI and systems
-    updateSpeedDisplay();
     updateDirectionDisplay();
     updateBoost(timeStep);
-    updateDelivery(timeStep);
+    updateDeliverySystem(timeStep);
     drawMinimap();
     
     // Render main scene

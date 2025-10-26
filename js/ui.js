@@ -1,24 +1,44 @@
 // UI updates and display
 
-function updateSpeedDisplay() {
-    const speedElement = document.getElementById('speed');
-    if (speedElement && carBody) {
-        // Calculate actual velocity magnitude
-        const velocityVec = new THREE.Vector3(carBody.velocity.x, carBody.velocity.y, carBody.velocity.z);
-        const actualSpeed = velocityVec.length();
-        speedElement.textContent = Math.abs(Math.round(actualSpeed));
-    }
-}
-
 function updateDirectionDisplay() {
-    const directionElement = document.getElementById('direction');
-    if (directionElement) {
-        if (carDirection > 0) {
-            directionElement.textContent = 'Forward';
-        } else if (carDirection < 0) {
-            directionElement.textContent = 'Reverse';
+    // Update wheel direction
+    const wheelDirEl = document.getElementById('wheel-direction');
+    if (wheelDirEl) {
+        if (carDirection < -0.1) {
+            wheelDirEl.textContent = 'Left';
+            wheelDirEl.style.color = '#ff6b6b';
+        } else if (carDirection > 0.1) {
+            wheelDirEl.textContent = 'Right';
+            wheelDirEl.style.color = '#4ecdc4';
         } else {
-            directionElement.textContent = 'Stopped';
+            wheelDirEl.textContent = 'Straight';
+            wheelDirEl.style.color = '#64b5f6';
+        }
+    }
+    
+    // Update car heading (convert from radians to degrees, normalize to 0-360)
+    if (carWrapper) {
+        let heading = (carWrapper.rotation.y * (180 / Math.PI)) % 360;
+        if (heading < 0) heading += 360;
+        const headingEl = document.getElementById('car-heading');
+        if (headingEl) {
+            headingEl.textContent = Math.round(heading) + '°';
+        }
+    }
+    
+    // Update speed - show actual velocity magnitude
+    if (carBody) {
+        const actualSpeed = Math.sqrt(
+            carBody.velocity.x ** 2 + carBody.velocity.z ** 2
+        );
+        const speedEl = document.getElementById('car-speed');
+        if (speedEl) {
+            speedEl.textContent = actualSpeed.toFixed(1);
+        }
+    } else {
+        const speedEl = document.getElementById('car-speed');
+        if (speedEl) {
+            speedEl.textContent = '0.0';
         }
     }
 }

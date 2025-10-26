@@ -29,7 +29,7 @@ function createDeliveryZones() {
     scene.add(deliveryZone);
 }
 
-function updateDelivery(deltaTime) {
+function updateDeliverySystem(deltaTime) {
     if (!carWrapper) return;
     
     const carPos = carWrapper.position;
