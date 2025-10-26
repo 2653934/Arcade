@@ -182,7 +182,7 @@ function setupCamera() {
     camera = new THREE.PerspectiveCamera(
         45,
         window.innerWidth / window.innerHeight,
-        0.1,
+        0.5, // Increased from 0.1 to improve depth precision and reduce shadow flickering
         1000
     );
     // Start with behind-car view
@@ -193,15 +193,21 @@ function setupCamera() {
 }
 
 function setupRenderer() {
-    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer = new THREE.WebGLRenderer({ 
+        antialias: true,
+        powerPreference: 'high-performance', // Request GPU acceleration
+        stencil: false, // Disable stencil buffer if not needed
+        logarithmicDepthBuffer: true // CRITICAL: Dramatically improves depth precision and reduces shadow flickering
+    });
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    // Improve shadow quality and reduce artifacts
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap; // Good balance of quality/performance
     renderer.shadowMap.autoUpdate = true;
-    renderer.shadowMap.needsUpdate = true;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.2;
+    
+    // Performance optimizations
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Cap at 2x for performance
     document.getElementById('container').appendChild(renderer.domElement);
 }
 
@@ -251,18 +257,17 @@ function setupLighting() {
     mainDirectionalLight.position.set(20, 30, 20);
     mainDirectionalLight.castShadow = true;
     // Shadow camera bounds - balance between range and quality
-    mainDirectionalLight.shadow.camera.left = -70;
-    mainDirectionalLight.shadow.camera.right = 70;
-    mainDirectionalLight.shadow.camera.top = 70;
-    mainDirectionalLight.shadow.camera.bottom = -70;
-    mainDirectionalLight.shadow.camera.near = 0.5;
-    mainDirectionalLight.shadow.camera.far = 80; // Limit shadow distance
-    mainDirectionalLight.shadow.mapSize.width = 4096; // Higher resolution for smoother shadows
-    mainDirectionalLight.shadow.mapSize.height = 4096;
-    mainDirectionalLight.shadow.radius = 1; // More softening for antialiasing
-    // Increased bias to prevent shadow acne
-    mainDirectionalLight.shadow.bias = -0.001;
-    mainDirectionalLight.shadow.normalBias = 0.05;
+    mainDirectionalLight.shadow.camera.left = -40; // Reduced shadow range for better performance
+    mainDirectionalLight.shadow.camera.right = 40;
+    mainDirectionalLight.shadow.camera.top = 40;
+    mainDirectionalLight.shadow.camera.bottom = -40;
+    mainDirectionalLight.shadow.camera.near = 1; // Increased from 0.5 to reduce close-range flickering
+    mainDirectionalLight.shadow.camera.far = 80;
+    mainDirectionalLight.shadow.mapSize.width = 2048; // Reduced from 4096 - HUGE performance gain
+    mainDirectionalLight.shadow.mapSize.height = 2048; // Still good quality but 4x faster
+    mainDirectionalLight.shadow.radius = 1;
+    mainDirectionalLight.shadow.bias = 0.0001; // Positive value to prevent shadow acne/flickering
+    mainDirectionalLight.shadow.normalBias = 0.02; // Adjusted to reduce close-range artifacts
     scene.add(mainDirectionalLight);
     scene.add(mainDirectionalLight.target); // Add target to scene so it can be updated
     
@@ -348,10 +353,10 @@ function setupShadowGround() {
     shadowGround.receiveShadow = true;
     shadowGround.renderOrder = 1; // Render after ground to prevent z-fighting
     
-    // Use polygon offset to prevent z-fighting
+    // Use polygon offset to prevent z-fighting at close range
     shadowGround.material.polygonOffset = true;
-    shadowGround.material.polygonOffsetFactor = 1;
-    shadowGround.material.polygonOffsetUnits = 1;
+    shadowGround.material.polygonOffsetFactor = -1; // Negative to push shadows slightly away
+    shadowGround.material.polygonOffsetUnits = -1;
     
     scene.add(shadowGround);
     
@@ -905,16 +910,9 @@ function createHeadlights() {
     console.log('Using headlight position:', headlightPos);
     console.log('Using backlight position:', backlightPos);
     
-    // Create left headlight (white/warm)
+    // Create left headlight (white/warm) - shadows disabled for performance
     leftHeadlight = new THREE.SpotLight(0xffffee, 5, 100, Math.PI / 6, 0.5, 1.5);
-    leftHeadlight.castShadow = true;
-    leftHeadlight.shadow.mapSize.width = 1024;
-    leftHeadlight.shadow.mapSize.height = 1024;
-    leftHeadlight.shadow.camera.near = 1;
-    leftHeadlight.shadow.camera.far = 20; // Shorter shadow range for realistic fade
-    leftHeadlight.shadow.bias = -0.001; // Reduce shadow acne
-    leftHeadlight.shadow.normalBias = 0.2; // Further reduce acne on curved surfaces
-    leftHeadlight.shadow.radius = 3; // Softer shadows with more blur
+    leftHeadlight.castShadow = false; // Disabled for performance - headlight shadows are expensive
     // Add visible sphere for left headlight
     const leftHeadSphere = new THREE.Mesh(
         new THREE.SphereGeometry(0.15, 8, 8),
@@ -922,16 +920,9 @@ function createHeadlights() {
     );
     leftHeadlight.add(leftHeadSphere);
     
-    // Create right headlight (white/warm)
+    // Create right headlight (white/warm) - shadows disabled for performance
     rightHeadlight = new THREE.SpotLight(0xffffee, 5, 100, Math.PI / 6, 0.5, 1.5);
-    rightHeadlight.castShadow = true;
-    rightHeadlight.shadow.mapSize.width = 1024;
-    rightHeadlight.shadow.mapSize.height = 1024;
-    rightHeadlight.shadow.camera.near = 1;
-    rightHeadlight.shadow.camera.far = 20; // Shorter shadow range for realistic fade
-    rightHeadlight.shadow.bias = -0.001; // Reduce shadow acne
-    rightHeadlight.shadow.normalBias = 0.2; // Further reduce acne on curved surfaces
-    rightHeadlight.shadow.radius = 3; // Softer shadows with more blur
+    rightHeadlight.castShadow = false; // Disabled for performance - headlight shadows are expensive
     // Add visible sphere for right headlight
     const rightHeadSphere = new THREE.Mesh(
         new THREE.SphereGeometry(0.15, 8, 8),
@@ -1006,16 +997,14 @@ function toggleHeadlights() {
     // Toggle headlights
     if (leftHeadlight) {
         leftHeadlight.visible = headlightsOn;
-        leftHeadlight.castShadow = headlightsOn;
-        // Adjust shadow intensity based on time of day
+        // Adjust intensity based on time of day
         if (headlightsOn) {
             leftHeadlight.intensity = isNightMode ? 5 : 3; // Dimmer in day
         }
     }
     if (rightHeadlight) {
         rightHeadlight.visible = headlightsOn;
-        rightHeadlight.castShadow = headlightsOn;
-        // Adjust shadow intensity based on time of day
+        // Adjust intensity based on time of day
         if (headlightsOn) {
             rightHeadlight.intensity = isNightMode ? 5 : 3; // Dimmer in day
         }
@@ -2041,7 +2030,7 @@ function toggleDayNight() {
     if (isNightMode) {
         // Night mode: PITCH BLACK - only car lights illuminate
         mainDirectionalLight.intensity = 0; // No moonlight
-        mainDirectionalLight.castShadow = false; // Sun doesn't cast shadows at night
+        mainDirectionalLight.castShadow = false; // Disable shadows at night for performance
         ambientLight.intensity = 0.15; // Small ambient light for minimap visibility
         
         // Show headlights UI in night mode
@@ -2358,11 +2347,12 @@ function init() {
         // Create a separate renderer for the minimap
         minimapRenderer = new THREE.WebGLRenderer({ 
             canvas: minimapCanvas, 
-            antialias: true,
-            alpha: false
+            antialias: false, // Disabled for performance - minimap doesn't need AA
+            alpha: false,
+            powerPreference: 'high-performance' // Request high performance mode
         });
         minimapRenderer.setSize(mapSize, mapSize);
-        minimapRenderer.shadowMap.enabled = true;
+        minimapRenderer.shadowMap.enabled = false; // DISABLED - minimap doesn't need shadows!
         
         // Get 2D context for the overlay canvas
         minimapOverlayCtx = minimapOverlayCanvas.getContext('2d');
@@ -2483,6 +2473,14 @@ function init() {
     console.log('║   💥 Particles spawn on impacts        ║');
     console.log('║   📷 Screen shake (speed-based)        ║');
     console.log('║   🔥 Impact flash (harder = redder)    ║');
+    console.log('║                                        ║');
+    console.log('║ ⚡ Performance Optimizations:          ║');
+    console.log('║   • Shadow maps: 2048x2048 (main)      ║');
+    console.log('║   • Headlight shadows: DISABLED        ║');
+    console.log('║   • Minimap shadows: DISABLED          ║');
+    console.log('║   • Pixel ratio capped at 2x           ║');
+    console.log('║   • Logarithmic depth buffer: ON       ║');
+    console.log('║   • Shadow flicker fixes: APPLIED      ║');
     console.log('╚════════════════════════════════════════╝\n');
 }
 
