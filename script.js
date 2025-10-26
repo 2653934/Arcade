@@ -332,13 +332,21 @@ function setupShadowGround() {
     // Create a large ground plane specifically for receiving shadows
     const groundGeometry = new THREE.PlaneGeometry(300, 300);
     const groundMaterial = new THREE.ShadowMaterial({
-        opacity: 0.5 // Darker shadow for visibility
+        opacity: 0.5, // Darker shadow for visibility
+        depthWrite: false // Prevent z-fighting with ground
     });
     
     const shadowGround = new THREE.Mesh(groundGeometry, groundMaterial);
     shadowGround.rotation.x = -Math.PI / 2;
     shadowGround.position.y = 0.01; // Will be updated after model loads
     shadowGround.receiveShadow = true;
+    shadowGround.renderOrder = 1; // Render after ground to prevent z-fighting
+    
+    // Use polygon offset to prevent z-fighting
+    shadowGround.material.polygonOffset = true;
+    shadowGround.material.polygonOffsetFactor = 1;
+    shadowGround.material.polygonOffsetUnits = 1;
+    
     scene.add(shadowGround);
     
     // Store reference for later update
@@ -355,10 +363,12 @@ function createDeliveryZones() {
         transparent: true,
         opacity: 0.5,
         emissive: 0x00ff00,
-        emissiveIntensity: 0.3
+        emissiveIntensity: 0.3,
+        depthWrite: false // Prevent z-fighting
     });
     pickupZone = new THREE.Mesh(pickupGeometry, pickupMaterial);
     pickupZone.position.set(pickupLocation.x, 0.1, pickupLocation.z); // Slightly above ground
+    pickupZone.renderOrder = 2; // Render after ground and shadows
     scene.add(pickupZone);
     
     // Create delivery zone (blue circle) - hidden initially
@@ -368,10 +378,12 @@ function createDeliveryZones() {
         transparent: true,
         opacity: 0.5,
         emissive: 0x0088ff,
-        emissiveIntensity: 0.3
+        emissiveIntensity: 0.3,
+        depthWrite: false // Prevent z-fighting
     });
     deliveryZone = new THREE.Mesh(deliveryGeometry, deliveryMaterial);
     deliveryZone.position.set(deliveryLocation.x, 0.1, deliveryLocation.z); // Slightly above ground
+    deliveryZone.renderOrder = 2; // Render after ground and shadows
     deliveryZone.visible = false; // Hidden until package picked up
     scene.add(deliveryZone);
 }
@@ -508,6 +520,7 @@ function onModelLoaded(gltf) {
             if (node.isMesh) {
                 node.receiveShadow = true;
                 node.visible = true;
+                node.renderOrder = 0; // Render ground first to prevent z-fighting
                 
                 if (node.material) {
                     const materials = Array.isArray(node.material) ? node.material : [node.material];
@@ -515,6 +528,7 @@ function onModelLoaded(gltf) {
                         if (mat && mat.type === 'MeshStandardMaterial') {
                             mat.side = THREE.DoubleSide;
                             mat.flatShading = false;
+                            mat.depthWrite = true; // Ensure proper depth writing
                         }
                     });
                 }
@@ -549,8 +563,9 @@ function onModelLoaded(gltf) {
             }
             
             // Update shadow ground position to be slightly above the ground
+            // Use larger offset to prevent z-fighting flickering
             if (window.shadowGroundPlane) {
-                window.shadowGroundPlane.position.y = groundTopY + 0.01;
+                window.shadowGroundPlane.position.y = groundTopY + 0.02;
                 console.log('Shadow ground updated to Y =', window.shadowGroundPlane.position.y);
             }
             
@@ -564,6 +579,7 @@ function onModelLoaded(gltf) {
             
             console.log('✓ Ground physics collider updated to match model');
             console.log('✓ Shadow ground and delivery zones positioned on ground surface');
+            console.log('✓ Z-fighting prevention: Ground at Y=' + groundTopY + ', Shadow at Y=' + (groundTopY + 0.02));
         } else {
             console.warn('⚠ Could not calculate ground bounding box - using default Y=0');
         }
@@ -586,6 +602,51 @@ function onModelLoaded(gltf) {
                     node.receiveShadow = true;
                     const bbox = new THREE.Box3().setFromObject(node);
                     console.log('  Bounding box:', bbox);
+                    
+                    // Debug materials and textures
+                    if (node.material) {
+                        const materials = Array.isArray(node.material) ? node.material : [node.material];
+                        materials.forEach((mat, matIndex) => {
+                            console.log(`  Material ${matIndex}:`, mat.name || 'unnamed');
+                            console.log('    Type:', mat.type);
+                            console.log('    Color:', mat.color);
+                            
+                            // Check for textures
+                            if (mat.map) {
+                                console.log('    ✓ Has diffuse/color map');
+                                // Ensure proper texture encoding for GLB
+                                mat.map.encoding = THREE.sRGBEncoding;
+                                mat.map.flipY = false; // GLB textures don't need flipping
+                                mat.map.needsUpdate = true;
+                            } else {
+                                console.warn('    ⚠ No diffuse/color map');
+                            }
+                            
+                            if (mat.normalMap) {
+                                console.log('    ✓ Has normal map');
+                                mat.normalMap.encoding = THREE.LinearEncoding;
+                                mat.normalMap.flipY = false;
+                                mat.normalMap.needsUpdate = true;
+                            }
+                            
+                            if (mat.roughnessMap) {
+                                console.log('    ✓ Has roughness map');
+                                mat.roughnessMap.encoding = THREE.LinearEncoding;
+                                mat.roughnessMap.flipY = false;
+                                mat.roughnessMap.needsUpdate = true;
+                            }
+                            
+                            if (mat.metalnessMap) {
+                                console.log('    ✓ Has metalness map');
+                                mat.metalnessMap.encoding = THREE.LinearEncoding;
+                                mat.metalnessMap.flipY = false;
+                                mat.metalnessMap.needsUpdate = true;
+                            }
+                            
+                            // Update material
+                            mat.needsUpdate = true;
+                        });
+                    }
                 }
             });
         });
@@ -606,6 +667,24 @@ function onModelLoaded(gltf) {
                     node.receiveShadow = true;
                     const bbox = new THREE.Box3().setFromObject(node);
                     console.log('  Bounding box:', bbox);
+                    
+                    // Debug materials and textures
+                    if (node.material) {
+                        const materials = Array.isArray(node.material) ? node.material : [node.material];
+                        materials.forEach((mat, matIndex) => {
+                            console.log(`  Material ${matIndex}:`, mat.name || 'unnamed');
+                            
+                            // Check for textures and fix encoding
+                            if (mat.map) {
+                                console.log('    ✓ Has texture');
+                                mat.map.encoding = THREE.sRGBEncoding;
+                                mat.map.flipY = false;
+                                mat.map.needsUpdate = true;
+                            }
+                            
+                            mat.needsUpdate = true;
+                        });
+                    }
                 }
             });
         });
@@ -634,7 +713,7 @@ function onModelLoaded(gltf) {
     // carWrapper.position.y = -center.y;
     // carWrapper.position.z = -center.z;
     
-    // Enable shadows on all car meshes
+    // Enable shadows and fix textures on all car meshes
     carModel.traverse(function (node) {
         if (node.isMesh) {
             node.castShadow = true;
@@ -649,6 +728,30 @@ function onModelLoaded(gltf) {
                         // Increase shadow bias to reduce artifacts
                         mat.side = THREE.DoubleSide;
                         mat.flatShading = false;
+                        
+                        // Fix texture encoding for GLB files
+                        if (mat.map) {
+                            mat.map.encoding = THREE.sRGBEncoding;
+                            mat.map.flipY = false;
+                            mat.map.needsUpdate = true;
+                        }
+                        if (mat.normalMap) {
+                            mat.normalMap.encoding = THREE.LinearEncoding;
+                            mat.normalMap.flipY = false;
+                            mat.normalMap.needsUpdate = true;
+                        }
+                        if (mat.roughnessMap) {
+                            mat.roughnessMap.encoding = THREE.LinearEncoding;
+                            mat.roughnessMap.flipY = false;
+                            mat.roughnessMap.needsUpdate = true;
+                        }
+                        if (mat.metalnessMap) {
+                            mat.metalnessMap.encoding = THREE.LinearEncoding;
+                            mat.metalnessMap.flipY = false;
+                            mat.metalnessMap.needsUpdate = true;
+                        }
+                        
+                        mat.needsUpdate = true;
                     }
                 });
             }
@@ -669,6 +772,29 @@ function onModelLoaded(gltf) {
     createCarPhysicsBody();
     createEnvironmentPhysics(); // Create physics for buildings and fences
     setupCollisionListeners(); // Setup collision particle effects
+    
+    // Final texture and material check
+    console.log('\n=== FINAL TEXTURE CHECK ===');
+    let textureCount = 0;
+    let missingTextures = 0;
+    carModel.traverse(function(node) {
+        if (node.isMesh && node.material) {
+            const materials = Array.isArray(node.material) ? node.material : [node.material];
+            materials.forEach(mat => {
+                if (mat.map) {
+                    textureCount++;
+                } else if (mat.type === 'MeshStandardMaterial') {
+                    missingTextures++;
+                    console.warn(`⚠ Object "${node.name}" has no texture - using color only`);
+                }
+            });
+        }
+    });
+    console.log(`✓ Textures loaded: ${textureCount}`);
+    if (missingTextures > 0) {
+        console.log(`⚠ Materials without textures: ${missingTextures} (will use vertex colors or solid colors)`);
+    }
+    console.log('===========================\n');
     
     console.log('Shadow setup complete - car should cast shadows');
     
