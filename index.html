@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Car Viewer</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="container"></div>
+    <div id="loading">Loading car model...</div>
+    <div id="direction-info">
+        <div>FPS: <span id="fps">60</span></div>
+        <div>Wheel Direction: <span id="wheel-direction">Straight</span></div>
+        <div>Car Heading: <span id="car-heading">0°</span></div>
+        <div>Speed: <span id="car-speed">0</span></div>
+        <div id="headlights-ui">Headlights [L]: <span id="headlights-status">ON</span></div>
+        <div>Boost [Space]: <span id="boost-status">OFF</span></div>
+        <div>
+            Boost Bar: 
+            <div class="boost-bar-container">
+                <div id="boost-bar-fill" class="boost-bar-fill"></div>
+            </div>
+            <span id="boost-percentage">100%</span>
+        </div>
+        <div>Delivery: <span id="delivery-status">Go to green zone</span></div>
+    </div>
+    <button id="toggle-colliders" class="toggle-btn">Hide Colliders</button>
+    <button id="toggle-daynight" class="toggle-btn">Night Mode</button>
+    <div id="minimap-container">
+        <canvas id="minimap" width="200" height="200"></canvas>
+        <canvas id="minimap-overlay" width="200" height="200"></canvas>
+    </div>
+    
+    <!-- Three.js Core Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+    <!-- Cannon.js Physics Engine -->
+    <script src="https://cdn.jsdelivr.net/npm/cannon@0.6.2/build/cannon.min.js"></script>
+    
+    <!-- Application Modules (in dependency order) -->
+    <script src="js/config.js"></script>
+    <script src="js/scene.js"></script>
+    <script src="js/physics.js"></script>
+    <script src="js/lighting.js"></script>
+    <script src="js/car.js"></script>
+    <script src="js/controls.js"></script>
+    <script src="js/ui.js"></script>
+    <script src="js/delivery.js"></script>
+    <script src="js/minimap.js"></script>
+    <script src="js/main.js"></script>
+</body>
+</html>

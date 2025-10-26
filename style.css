@@ -1,0 +1,144 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    overflow: hidden;
+    font-family: 'Arial', sans-serif;
+    background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+}
+
+#container {
+    width: 100vw;
+    height: 100vh;
+}
+
+#loading {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: white;
+    font-size: 24px;
+    font-weight: bold;
+    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+    z-index: 100;
+    transition: opacity 0.5s ease;
+}
+
+#loading.hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+
+#direction-info {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    background: rgba(0, 0, 0, 0.7);
+    color: white;
+    padding: 15px 20px;
+    border-radius: 10px;
+    font-family: 'Arial', monospace;
+    font-size: 16px;
+    z-index: 10;
+    backdrop-filter: blur(10px);
+}
+
+#direction-info div {
+    margin: 5px 0;
+}
+
+#direction-info span {
+    color: #64b5f6;
+    font-weight: bold;
+}
+
+.boost-bar-container {
+    display: inline-block;
+    width: 100px;
+    height: 12px;
+    background: rgba(50, 50, 50, 0.8);
+    border: 1px solid #64b5f6;
+    border-radius: 6px;
+    overflow: hidden;
+    vertical-align: middle;
+    margin: 0 8px;
+}
+
+.boost-bar-fill {
+    height: 100%;
+    width: 100%;
+    background: linear-gradient(90deg, #ffaa00, #ffdd00);
+    border-radius: 5px;
+    transition: width 0.1s ease, background 0.3s ease;
+}
+
+.boost-bar-fill.low {
+    background: linear-gradient(90deg, #ff4444, #ff8844);
+}
+
+.toggle-btn {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    background: rgba(100, 181, 246, 0.8);
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 8px;
+    font-family: 'Arial', sans-serif;
+    font-size: 14px;
+    font-weight: bold;
+    cursor: pointer;
+    z-index: 10;
+    backdrop-filter: blur(10px);
+    transition: background 0.3s ease;
+}
+
+.toggle-btn:hover {
+    background: rgba(100, 181, 246, 1);
+}
+
+.toggle-btn:active {
+    transform: scale(0.95);
+}
+
+#toggle-daynight {
+    top: 70px;
+}
+
+#minimap-container {
+    position: absolute;
+    bottom: 20px;
+    right: 20px;
+    width: 200px;
+    height: 200px;
+    border: 3px solid rgba(100, 181, 246, 0.8);
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(10px);
+    z-index: 10;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+}
+
+#minimap {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 200px;
+    height: 200px;
+    border-radius: 7px;
+}
+
+#minimap-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 200px;
+    height: 200px;
+    border-radius: 7px;
+    pointer-events: none;
+}
